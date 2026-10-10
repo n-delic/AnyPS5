@@ -2436,6 +2436,20 @@ void VulkanDevice::QueuePresent() {
     else check(presented, "vkQueuePresentKHR");
     timing.Mark("queue_present");
     APS5_LOG_OUT_DEBUG("vkQueuePresentKHR queued imageIndex=%u", index);
+    {
+        // TEMP-DEBUG: presents per 5 seconds.
+        static std::atomic<unsigned> presents{0};
+        static std::atomic<std::int64_t> windowStart{0};
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        std::int64_t start = windowStart.load();
+        if (start == 0) windowStart.compare_exchange_strong(start, now);
+        const auto count = ++presents;
+        if (now - windowStart.load() >= 5000) {
+            std::fprintf(stderr, "[TEMP-DEBUG fps] %u presents in %lld ms\n", count, static_cast<long long>(now - windowStart.load()));
+            presents = 0;
+            windowStart = now;
+        }
+    }
 }
 
 ShaderRecompiler::SpirvTarget VulkanDevice::ComputeTarget(std::uint32_t waveSize) const {

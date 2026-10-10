@@ -221,6 +221,19 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             if (profile && elapsed > 200) std::fprintf(stderr, "[gpu] compute shader 0x%llx recompile took %.0f ms (%zu SPIR-V words, %zu captured regions, total %.1f s)\n", static_cast<unsigned long long>(address), elapsed, compiledResult->spirv.size(), captured.size(), totalMs / 1000);
         } catch (const std::exception& error) {
             const auto dump = dumpShaders ? dumpRequest(address, request) : std::string{};
+            if (dumpShaders) {
+                // TEMP-DEBUG: dump guest memory behind every 64-bit user-data value that looks like a code pointer.
+                const auto& user = request.context.userData;
+                for (std::size_t i = 0; i + 1 < user.size(); ++i) {
+                    const auto pointer = (static_cast<std::uint64_t>(user[i + 1]) << 32u) | user[i];
+                    if (pointer < 0x100000000ull || !GuestMemory::Accessible(reinterpret_cast<const void*>(pointer), 4096)) continue;
+                    std::vector<std::byte> bytes(4096);
+                    GuestMemory::Read(pointer, bytes);
+                    char name[96];
+                    std::snprintf(name, sizeof(name), "callee_%llx_s%zu_%llx.bin", static_cast<unsigned long long>(address), i, static_cast<unsigned long long>(pointer));
+                    if (FILE* file = std::fopen(name, "wb")) { std::fwrite(bytes.data(), 1, bytes.size(), file); std::fclose(file); std::fprintf(stderr, "[gpu] TEMP-DEBUG wrote %s\n", name); }
+                }
+            }
 
             std::string reason = error.what();
             if (const auto newline = reason.find('\n'); newline != std::string::npos) reason.resize(newline);

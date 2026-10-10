@@ -241,9 +241,27 @@ bool HandleSse4a(EXCEPTION_POINTERS* info) {
 LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     static std::atomic<bool> reported{false};
     const auto* fault = info->ExceptionRecord;
-    if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 1 && GuestArena::GuestArenaHandleWrite_nid_postfix(fault->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
+    static std::atomic<unsigned long long> resumedWrites{0}, resumedOther{0};
+    if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 1 && GuestArena::GuestArenaHandleWrite_nid_postfix(fault->ExceptionInformation[1])) {
+        const auto n = ++resumedWrites;
+        {
+            static std::atomic<int> guestShown{0};
+            HMODULE module = nullptr;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCSTR>(info->ContextRecord->Rip), &module) && module == GetModuleHandleW(nullptr) && guestShown.fetch_add(1) < 40) {
+                char where[256];
+                DescribeAddress(info->ContextRecord->Rip, where, sizeof(where));
+                Report("[TEMP-DEBUG faults] guest write fault at %s rsp %p\n", where, reinterpret_cast<void*>(info->ContextRecord->Rsp));
+            }
+        }
+        if ((n & (n - 1)) == 0) Report("[TEMP-DEBUG faults] %llu resumed write faults (last rip %p, rsp %p)\n", n, reinterpret_cast<void*>(info->ContextRecord->Rip), reinterpret_cast<void*>(info->ContextRecord->Rsp));
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     if (HandleWatch(info)) return EXCEPTION_CONTINUE_EXECUTION;
-    if (HandleSse4a(info)) return EXCEPTION_CONTINUE_EXECUTION;
+    if (HandleSse4a(info)) {
+        const auto n = ++resumedOther;
+        if ((n & (n - 1)) == 0) Report("[TEMP-DEBUG faults] %llu resumed SSE4A faults\n", n);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     const auto* record = info->ExceptionRecord;
     if (!IsFatal(record->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
     if (reported.exchange(true)) {
@@ -420,6 +438,20 @@ void ReportAllThreads() {
     Report("  all threads:\n");
     for (std::size_t i = 0; i < capturedCount; ++i) {
         ReportThreadContext(&captured[i].context, captured[i].id, captured[i].name, captured[i].frames, captured[i].frameCount);
+        // TEMP-DEBUG: return address candidates for every thread.
+        static const bool scanAll = std::getenv("APS5_SCAN_ALL_STACKS") != nullptr;
+        if (!scanAll) continue;
+        char line[256];
+        int printed = 0;
+        for (std::uint64_t slot = captured[i].context.Rsp; printed < 14 && slot < captured[i].context.Rsp + 0x1000; slot += 8) {
+            if (!IsReadable(slot)) break;
+            const auto value = *reinterpret_cast<const std::uint64_t*>(slot);
+            if (!IsExecutable(value)) continue;
+            DescribeAddress(value, line, sizeof(line));
+            if (std::strstr(line, "ntdll") || std::strstr(line, "KERNELBASE") || std::strstr(line, "libwinpthread") || std::strstr(line, "ucrtbase") || std::strstr(line, "libstdc")) continue;
+            Report("      [rsp+0x%llx] %s\n", static_cast<unsigned long long>(slot - captured[i].context.Rsp), line);
+            ++printed;
+        }
     }
     if (skippedCount != 0) Report("  %llu further thread(s) left out\n", static_cast<unsigned long long>(skippedCount));
 }

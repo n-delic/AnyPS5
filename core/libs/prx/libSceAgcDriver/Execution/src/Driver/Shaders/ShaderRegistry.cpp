@@ -1,5 +1,8 @@
 #include "prx/libc/include/general/LogMacros.hpp"
 #include "ControlFlow/GraphBuilder.hpp"
+#include "ControlFlow/RequestSerializer.hpp"
+#include <cstdio>
+#include <chrono>
 #include "ControlFlow/Structurizer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
@@ -366,10 +369,53 @@ std::vector<PreparedShaders::Entry> PrepareRegistered(const ShaderSnapshot& snap
     std::vector<std::uint32_t> userData(userCount);
     if (stage != Stage::Compute && stage != Stage::Fragment && snapshot.type != 6) vertex = Graphics::DecodeVertexStageInfo(snapshot.header, snapshot.headerAddress, userData, nullptr, true);
     const ShaderRecompiler::SwappcInfo swappc{vertex.has_value(), firstUser, userCount};
-    auto graph = ShaderRecompiler::GraphBuilder{}.Build(decoded, &swappc);
-    ShaderRecompiler::Structurizer{}.Structurize(graph);
     const std::array<ShaderRecompiler::MemoryRegion, 2> memory{{{snapshot.codeAddress, std::as_bytes(std::span(snapshot.code))}, {snapshot.headerAddress, snapshot.header}}};
     ShaderRecompiler::RecompileRequest request{{stage, address, code, snapshot.headerAddress, snapshot.header}, {wave, firstUser, userData, compute, pixel, vertex, memory, RegisteredFloatMode(snapshot)}, stage == Stage::Compute ? device.ComputeTarget(wave) : device.Target(), {0, 0, 0, 128}, graphics};
+    ShaderRecompiler::ControlFlowGraph graph;
+    try {
+        graph = ShaderRecompiler::GraphBuilder{}.Build(decoded, &swappc);
+    } catch (const std::exception& error) {
+        // TEMP-DEBUG: dump the request of a shader whose control flow cannot be analyzed.
+        std::fprintf(stderr, "[gpu] TEMP-DEBUG registration analysis of 0x%llx failed: %s\n", static_cast<unsigned long long>(address), error.what());
+        if (registration && compute) return {};
+        char name[64];
+        std::snprintf(name, sizeof(name), "shader_fail_%llx.req", static_cast<unsigned long long>(address));
+        if (FILE* file = std::fopen(name, "wb")) {
+            const auto text = ShaderRecompiler::RequestSerializer{}.Serialize(request);
+            std::fwrite(text.data(), 1, text.size(), file);
+            std::fclose(file);
+            std::fprintf(stderr, "[gpu] TEMP-DEBUG wrote %s\n", name);
+        }
+        throw;
+    }
+    {
+        // TEMP-DEBUG: time registration-time structurization.
+        const auto started = std::chrono::steady_clock::now();
+        try {
+            ShaderRecompiler::Structurizer{}.Structurize(graph);
+        } catch (const std::exception& error) {
+            char name[64];
+            std::snprintf(name, sizeof(name), "structfail_%llx.req", static_cast<unsigned long long>(address));
+            if (FILE* file = std::fopen(name, "wb")) {
+                const auto text = ShaderRecompiler::RequestSerializer{}.Serialize(request);
+                std::fwrite(text.data(), 1, text.size(), file);
+                std::fclose(file);
+            }
+            std::fprintf(stderr, "[gpu] TEMP-DEBUG structurize of 0x%llx failed (%s), wrote %s\n", static_cast<unsigned long long>(address), error.what(), name);
+            throw;
+        }
+        const auto ms =std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        if (ms > 200.0) std::fprintf(stderr, "[TEMP-DEBUG structurize] 0x%llx stage %d: %zu instructions, %zu blocks, %.0f ms\n", static_cast<unsigned long long>(address), static_cast<int>(stage), decoded.instructions.size(), graph.blocks.size(), ms);
+        if (ms > 2000.0) {
+            char name[64];
+            std::snprintf(name, sizeof(name), "slow_%llx.req", static_cast<unsigned long long>(address));
+            if (FILE* file = std::fopen(name, "wb")) {
+                const auto text = ShaderRecompiler::RequestSerializer{}.Serialize(request);
+                std::fwrite(text.data(), 1, text.size(), file);
+                std::fclose(file);
+            }
+        }
+    }
     if (graphics && graphics->mesh) request.layout.pushConstantSizeBytes = ShaderRecompiler::MeshDrawPushOffsetBytes;
     std::vector<PreparedShaders::Entry> entries;
     const auto append = [&] {
