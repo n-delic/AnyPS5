@@ -426,6 +426,24 @@ std::uint32_t mergeBesideReturns(const ControlFlowGraph& graph, const BasicBlock
     return *merge;
 }
 
+std::uint32_t dedicatedMergeStub(const ControlFlowGraph& graph, const BasicBlock& header, std::uint32_t merge) {
+    if (merge == InvalidControlFlowId) return merge;
+    std::uint32_t inside = InvalidControlFlowId;
+    bool outside = false;
+    for (const auto predecessor : graph.FindBlock(merge).predecessors) {
+        if (predecessor != header.id && graph.Dominates(header.id, predecessor)) {
+            if (inside != InvalidControlFlowId) return merge;
+            inside = predecessor;
+        } else {
+            outside = true;
+        }
+    }
+    if (!outside || inside == InvalidControlFlowId) return merge;
+    const auto& stub = graph.FindBlock(inside);
+    const bool emptyBranch = stub.instructionBegin == stub.instructionEnd && stub.terminator.kind == TerminatorKind::Branch && stub.successors.size() == 1u && stub.successors.front() == merge;
+    return emptyBranch ? inside : merge;
+}
+
 std::uint32_t findSelectionMerge(const ControlFlowGraph& graph, const BasicBlock& block) {
     const auto globalMerge = graph.FindNearestCommonPostDominator(block.terminator.trueBlock, block.terminator.falseBlock);
     const auto* loop = findInnermostContainingLoop(graph, block.id);
@@ -582,6 +600,15 @@ bool splitSharedMergeBlock(ControlFlowGraph& graph, std::uint32_t merge, const s
 
     if (constructPredecessors.empty() || (!forceSplit && !hasExternalPredecessor)) {
         return false;
+    }
+    if (constructPredecessors.size() == 1u) {
+        const auto& only = graph.FindBlock(constructPredecessors.front());
+        if (only.instructionBegin == only.instructionEnd && only.terminator.kind == TerminatorKind::Branch && only.successors.size() == 1u && only.successors.front() == merge) {
+            const bool mergesAnotherSelection = std::any_of(graph.blocks.begin(), graph.blocks.end(), [&](const BasicBlock& other) {
+                return other.terminator.kind == TerminatorKind::ConditionalBranch && findSelectionMerge(graph, other) == only.id;
+            });
+            if (!mergesAnotherSelection) return false;
+        }
     }
 
     const auto syntheticMerge = appendSyntheticBranchBlock(graph, merge);
@@ -1293,9 +1320,12 @@ void Structurizer::Structurize(ControlFlowGraph& graph) const {
             continue;
         }
 
-        const auto merge = findSelectionMerge(graph, block);
+        auto merge = findSelectionMerge(graph, block);
         if (merge == InvalidControlFlowId) {
             throw std::runtime_error("conditional block " + std::to_string(block.id) + " has no structured merge");
+        }
+        if (const auto taken = mergeHeaders.find(merge); taken != mergeHeaders.end() && taken->second != block.id) {
+            merge = dedicatedMergeStub(graph, block, merge);
         }
 
         reserveMergeBlock(block.id, merge);

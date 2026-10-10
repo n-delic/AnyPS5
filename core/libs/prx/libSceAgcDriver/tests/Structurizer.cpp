@@ -100,6 +100,9 @@ int main() {
         auto innerEndingExit = makeGraph({{1}, {2}, {3}, {7, 4}, {2, 5}, {1, 6}, {}, {}});
         Structurizer{}.Structurize(innerEndingExit);
         requireStructuredBranches(innerEndingExit, "an inner loop exit that ends the program");
+        auto sharedLoopMerge = makeGraph({{1}, {2, 4}, {3, 4}, {4, 5}, {1, 6}, {1}, {}});
+        Structurizer{}.Structurize(sharedLoopMerge);
+        requireStructuredBranches(sharedLoopMerge, "nested selections in a loop whose merges chain into a shared block");
         auto earlyReturn = makeGraph({{2, 1}, {4, 2}, {3, 5}, {5}, {}, {}});
         Structurizer{}.Structurize(earlyReturn);
         requireStructuredBranches(earlyReturn, "an early return inside a selection that joins its parent's merge");
