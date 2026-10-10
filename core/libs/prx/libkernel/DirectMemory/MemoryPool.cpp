@@ -33,7 +33,18 @@ struct PhysicalMemoryPool {
 
     void Free(uint64_t start, size_t len) {
         std::lock_guard<std::mutex> lock(_mutex);
-        _free(start, len);
+        if (start >= DIRECT_MEMORY_SIZE) return;
+        const uint64_t end = start + std::min<uint64_t>(len, DIRECT_MEMORY_SIZE - start);
+        uint64_t cur = start & ~static_cast<uint64_t>(PS5_PAGE_SIZE - 1);
+        while (cur < end) {
+            if (!_used[cur / PS5_PAGE_SIZE]) {
+                cur += PS5_PAGE_SIZE;
+                continue;
+            }
+            const uint64_t runStart = cur;
+            while (cur < end && _used[cur / PS5_PAGE_SIZE]) cur += PS5_PAGE_SIZE;
+            _free(runStart, cur - runStart);
+        }
     }
 
     bool CheckedFree(uint64_t start, size_t len) {

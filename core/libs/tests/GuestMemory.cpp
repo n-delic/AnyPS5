@@ -217,6 +217,20 @@ static void CheckCheckedReleaseDirectMemory() {
     Require(sceKernelCheckedReleaseDirectMemory(phys, page) == SCE_KERNEL_ERROR_ENOENT);
 }
 
+static void CheckReleaseDirectMemorySkipsHoles() {
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 3, 0, 0, &phys) == 0);
+    Require(sceKernelCheckedReleaseDirectMemory(phys + page, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 4) == 0);
+    Require(sceKernelCheckedReleaseDirectMemory(phys, page) == SCE_KERNEL_ERROR_ENOENT);
+    Require(sceKernelCheckedReleaseDirectMemory(phys + page * 2, page) == SCE_KERNEL_ERROR_ENOENT);
+    Require(sceKernelReleaseDirectMemory(phys, page * 4) == 0);
+    std::int64_t again = 0;
+    Require(sceKernelAllocateDirectMemory(phys, phys + page * 3, page * 3, 0, 0, &again) == 0 && again == phys);
+    Require(sceKernelCheckedReleaseDirectMemory(phys, page * 3) == 0);
+}
+
 static void CheckDirectMemoryFollowsPhysicalPages() {
     constexpr std::size_t page = 0x4000;
     std::int64_t phys = 0;
@@ -1068,6 +1082,7 @@ int main() {
     CheckInternalNamedFlexibleMapping();
     CheckBatchMapStopsAtInvalidEntry();
     CheckCheckedReleaseDirectMemory();
+    CheckReleaseDirectMemorySkipsHoles();
     CheckAudioCoprocessorProtection();
     CheckDirectMemoryFollowsPhysicalPages();
     CheckReleaseDirectMemoryClearsMappings();
