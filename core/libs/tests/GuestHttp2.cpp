@@ -16,6 +16,8 @@ int APS5_VABI sceHttp2SendRequestAsync(int, const void*, std::size_t, Http2Async
 int APS5_VABI sceHttp2WaitAsync(int, Http2AsyncResult*, std::uint32_t*, void*);
 int APS5_VABI sceHttp2DeleteRequest(int);
 int APS5_VABI sceHttp2Term(int);
+int APS5_VABI sceHttp2GetMemoryPoolStats(int, MemoryPoolStats*);
+int APS5_VABI sceHttp2SetResolveRetry(int, std::int32_t);
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name);
 int APS5_VABI sceKernelDeleteEqueue(KernelEqueue eq);
 int APS5_VABI sceKernelWaitEqueue(KernelEqueue eq, KernelEvent* ev, int num, int* out, const KernelUseconds* timo);
@@ -79,5 +81,11 @@ int main() {
     Require(Throws([&] { sceHttp2WaitAsync(request, &result, nullptr, nullptr); }));
     Require(sceHttp2DeleteRequest(request) == 0);
     Require(sceKernelDeleteEqueue(eq) == 0);
+    MemoryPoolStats stats{1, 2, 3};
+    Require(sceHttp2GetMemoryPoolStats(context, &stats) == 0);
+    Require(stats.poolSize == 0x10000 && stats.maxInuseSize == 0 && stats.currentInuseSize == 0);
+    Require(Throws([&] { sceHttp2GetMemoryPoolStats(context, nullptr); }));
+    Require(sceHttp2SetResolveRetry(context, 3) == 0);
     Require(sceHttp2Term(context) == 0);
+    Require(Throws([&] { sceHttp2GetMemoryPoolStats(context, &stats); }));
 }

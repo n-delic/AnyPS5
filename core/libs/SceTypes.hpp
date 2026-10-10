@@ -1237,6 +1237,13 @@ struct SceHttpUriElement {
     std::uint8_t reserved[10]{};
 };
 
+struct MemoryPoolStats {
+    std::uint64_t poolSize;
+    std::uint64_t maxInuseSize;
+    std::uint64_t currentInuseSize;
+};
+static_assert(sizeof(MemoryPoolStats) == 24);
+
 struct Http2AsyncResult {
     int event_type;
     int req_id;

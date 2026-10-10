@@ -3,11 +3,17 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include <atomic>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 // No network is emulated: contexts, templates and requests can be created, but any request
 // that would touch the network fails with the library's network error.
 static constexpr int ERROR_NETWORK = static_cast<int>(0x80435001);
 static std::atomic<int> g_nextHandle{1};
+static std::mutex g_contextsMutex;
+static std::unordered_map<int, std::uint64_t> g_contextPoolSizes;
 
 namespace {
 
@@ -44,12 +50,15 @@ int APS5_VABI sceSslGetCaCerts(int ssl_ctx_id, void* ca_certs) {
 }
 
 int APS5_VABI sceSslInit_nid_postfix(uint64_t pool_size) {
-    (void)pool_size;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock(g_contextsMutex);
+    g_contextPoolSizes[id] = pool_size;
+    return id;
 }
 
 int APS5_VABI sceSslTerm_nid_postfix(int ssl_ctx_id) {
-    (void)ssl_ctx_id;
+    std::lock_guard lock(g_contextsMutex);
+    g_contextPoolSizes.erase(ssl_ctx_id);
     return 0;
 }
 
@@ -68,8 +77,12 @@ int APS5_VABI sceSslLoadCert() {
     return 0;
 }
 
-int APS5_VABI sceSslGetMemoryPoolStats() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceSslGetMemoryPoolStats(int ssl_ctx_id, MemoryPoolStats* current_stat) {
+    if (current_stat == nullptr) throw std::invalid_argument("sceSslGetMemoryPoolStats: current_stat is null");
+    std::lock_guard lock(g_contextsMutex);
+    const auto found = g_contextPoolSizes.find(ssl_ctx_id);
+    if (found == g_contextPoolSizes.end()) throw std::invalid_argument("sceSslGetMemoryPoolStats: unknown context id " + std::to_string(ssl_ctx_id));
+    *current_stat = MemoryPoolStats{found->second, 0, 0};
     return 0;
 }
 

@@ -6,12 +6,16 @@
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 // No network is emulated: contexts, templates and requests can be created, but any request
 // that would touch the network fails with the library's network error.
 static constexpr int ERROR_NETWORK = static_cast<int>(0x80436063);
 static std::atomic<int> g_nextHandle{1};
+static std::mutex g_contextsMutex;
+static std::unordered_map<int, std::uint64_t> g_contextPoolSizes;
 static std::mutex g_completionsMutex;
 static std::unordered_map<int, std::deque<Http2AsyncResult>> g_completions;
 
@@ -92,9 +96,11 @@ int APS5_VABI sceHttp2GetStatusCode(int req_id, int* status_code) {
 int APS5_VABI sceHttp2Init(int libnet_mem_id, int libssl_ctx_id, size_t pool_size, int max_concurrent_request) {
     (void)libnet_mem_id;
     (void)libssl_ctx_id;
-    (void)pool_size;
     (void)max_concurrent_request;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock(g_contextsMutex);
+    g_contextPoolSizes[id] = pool_size;
+    return id;
 }
 
 int APS5_VABI sceHttp2ReadData(int req_id, void* data, size_t size) {
@@ -226,7 +232,8 @@ int APS5_VABI sceHttp2SetMinSslVersion(int id, uint32_t ssl_version) {
 }
 
 int APS5_VABI sceHttp2Term(int lib_http2_ctx_id) {
-    (void)lib_http2_ctx_id;
+    std::lock_guard lock(g_contextsMutex);
+    g_contextPoolSizes.erase(lib_http2_ctx_id);
     return 0;
 }
 
@@ -246,8 +253,12 @@ int APS5_VABI sceHttp2AbortRequest(int req_id) {
     return 0;
 }
 
-int APS5_VABI sceHttp2GetMemoryPoolStats() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceHttp2GetMemoryPoolStats(int lib_http2_ctx_id, MemoryPoolStats* current_stat) {
+    if (current_stat == nullptr) throw std::invalid_argument("sceHttp2GetMemoryPoolStats: current_stat is null");
+    std::lock_guard lock(g_contextsMutex);
+    const auto found = g_contextPoolSizes.find(lib_http2_ctx_id);
+    if (found == g_contextPoolSizes.end()) throw std::invalid_argument("sceHttp2GetMemoryPoolStats: unknown context id " + std::to_string(lib_http2_ctx_id));
+    *current_stat = MemoryPoolStats{found->second, 0, 0};
     return 0;
 }
 
