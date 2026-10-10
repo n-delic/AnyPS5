@@ -118,6 +118,7 @@ struct MeshDraw {
     std::array<std::uint32_t, 4> vertexBuffer;
     std::uint32_t geometryPushBytes = ShaderRecompiler::MeshDrawPushOffsetBytes;
     bool restart = false;
+    std::uint32_t waveSize = 64;
 };
 
 void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
@@ -129,7 +130,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     const std::array<ShaderRecompiler::MemoryRegion, 1> geometryMemory{{{reinterpret_cast<std::uintptr_t>(GeometryCode.data()), std::as_bytes(std::span(GeometryCode))}}};
     ShaderRecompiler::RecompileRequest geometry{
         {ShaderStage::Mesh, reinterpret_cast<std::uintptr_t>(GeometryCode.data()), GeometryCode, 0, {}},
-        {64, 0, userData, std::nullopt, std::nullopt, ShaderRecompiler::ShaderVertexStageInfo{}, geometryMemory},
+        {setup.waveSize, 0, userData, std::nullopt, std::nullopt, ShaderRecompiler::ShaderVertexStageInfo{}, geometryMemory},
         target,
         {0, 0, 0, setup.geometryPushBytes},
         ShaderRecompiler::GraphicsCompileContext{0, {}, setup.mesh, std::nullopt, {setup.draw.indexAddress, setup.draw.indexCount, setup.draw.indexSize, setup.draw.instanceCount}}
@@ -179,6 +180,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
 
 constexpr ShaderRecompiler::MeshConfiguration SmallSubgroup{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u};
 constexpr ShaderRecompiler::MeshConfiguration WideSubgroup{4u, 32u, 96u, 96u, 32u, 128u, 2048u, 0u, 4u};
+constexpr ShaderRecompiler::MeshConfiguration Wave32Subgroup{4u, 8u, 24u, 24u, 8u, 64u, 1024u, 0u, 4u};
 
 std::size_t FanPixel(float angle, float radius) {
     const auto x = static_cast<std::uint32_t>((radius * std::cos(angle) + 1.0f) * 0.5f * Width);
@@ -256,6 +258,12 @@ int main() {
             DrawMesh(device, {subgroup, {0, static_cast<std::uint32_t>(Ordered.size()), 0, 1, 0, false}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size()))});
             CheckTriangles((std::string("non-indexed triangle list, ") + name).c_str());
         }
+
+        ClearPixels();
+        MeshDraw wave32{Wave32Subgroup, {reinterpret_cast<std::uintptr_t>(Indices.data()), static_cast<std::uint32_t>(Indices.size()), 2, 1, 0, true}, VertexBufferDescriptor(Scrambled.data(), static_cast<std::uint32_t>(Scrambled.size()))};
+        wave32.waveSize = 32;
+        DrawMesh(device, wave32);
+        CheckTriangles("indexed triangle list, wave32 subgroups");
 
         constexpr std::size_t recordBlockBytes = 65536;
         auto* record = static_cast<std::uint32_t*>(::operator new(recordBlockBytes, std::align_val_t{65536}));
