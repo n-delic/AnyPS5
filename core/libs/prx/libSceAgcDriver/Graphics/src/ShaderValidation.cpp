@@ -519,6 +519,18 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
 
 }
 
+static bool UnsignedIntegerColorFormat(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8_UINT: case VK_FORMAT_R8G8_UINT: case VK_FORMAT_R8G8B8A8_UINT: case VK_FORMAT_B8G8R8A8_UINT:
+        case VK_FORMAT_A2B10G10R10_UINT_PACK32: case VK_FORMAT_A2R10G10B10_UINT_PACK32:
+        case VK_FORMAT_R16_UINT: case VK_FORMAT_R16G16_UINT: case VK_FORMAT_R16G16B16A16_UINT:
+        case VK_FORMAT_R32_UINT: case VK_FORMAT_R32G32_UINT: case VK_FORMAT_R32G32B32A32_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders, const State& state, const VkPhysicalDeviceSubgroupProperties& subgroup, bool fragmentShaderBarycentric, bool descriptorIndexing, bool imageInt64Atomics, bool geometryShader, bool sampleRateShading) {
     using Stage = ShaderRecompiler::ShaderStage;
     const bool tessellation = state.stages.path == ShaderPath::Tessellation;
@@ -553,7 +565,8 @@ std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders,
     std::set<std::uint32_t> locations;
     for (const auto& [location, signature] : previous.outputs) {
         if (location >= attachments) continue;
-        Require(signature == "vertex:f32x4", "fragment shader must export float4 colors to its attachments");
+        const bool unsignedTarget = location < state.colors.size() && UnsignedIntegerColorFormat(state.colors[location].format);
+        Require(signature == "vertex:f32x4" || (signature == "vertex:u32x4" && unsignedTarget), "fragment shader must export float4 colors, or uint4 colors to unsigned integer attachments");
         locations.insert(location);
     }
     return locations;

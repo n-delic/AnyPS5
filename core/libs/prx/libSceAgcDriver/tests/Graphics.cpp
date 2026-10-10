@@ -158,6 +158,11 @@ void stateTests() {
     queue.context[0x8f] = 0xff;
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "color export format 0");
     queue = makeState();
+    queue.context[0x1c5] = 7;
+    Require(AgcDriver::Graphics::DecodeState(queue).hasColorTarget, "the UINT16_ABGR export format was refused");
+    queue.context[0x1c5] = 8;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "color export format 8");
+    queue = makeState();
     queue.context[0x200] = 2;
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "depth");
     queue = makeState();
