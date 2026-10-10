@@ -1389,10 +1389,37 @@ void Structurizer::computePostDominators(ControlFlowGraph& graph) const {
         block.postDominators = block.successors.empty() ? std::vector<std::uint32_t>{block.id} : all;
     }
 
+    std::vector<std::uint32_t> order;
+    order.reserve(count);
+    std::vector<bool> visited(count, false);
+    std::vector<std::pair<std::uint32_t, std::size_t>> stack;
+    const auto visitFrom = [&](std::uint32_t root) {
+        if (visited[root]) return;
+        visited[root] = true;
+        stack.emplace_back(root, 0);
+        while (!stack.empty()) {
+            auto& [id, next] = stack.back();
+            const auto& successors = graph.blocks[id].successors;
+            if (next < successors.size()) {
+                const auto successor = successors[next++];
+                if (!visited[successor]) {
+                    visited[successor] = true;
+                    stack.emplace_back(successor, 0);
+                }
+                continue;
+            }
+            order.push_back(id);
+            stack.pop_back();
+        }
+    };
+    visitFrom(graph.entryBlock);
+    for (std::uint32_t id = 0; id < count; ++id) visitFrom(id);
+
     bool changed = true;
     while (changed) {
         changed = false;
-        for (auto& block : graph.blocks) {
+        for (const auto id : order) {
+            auto& block = graph.blocks[id];
             std::vector<std::uint32_t> next;
             if (block.successors.empty()) {
                 next = {block.id};
