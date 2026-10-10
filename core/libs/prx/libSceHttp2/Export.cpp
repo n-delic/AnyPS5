@@ -182,6 +182,12 @@ int APS5_VABI sceHttp2SetResolveTimeOut(int id, uint32_t usec) {
     return 0;
 }
 
+int APS5_VABI sceHttp2SetResolveRetry(int id, int32_t retry) {
+    (void)id;
+    (void)retry;
+    return 0;
+}
+
 int APS5_VABI sceHttp2SetSendTimeOut(int id, uint32_t usec) {
     (void)id;
     (void)usec;
