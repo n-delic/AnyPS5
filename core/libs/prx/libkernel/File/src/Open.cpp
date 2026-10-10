@@ -1,4 +1,5 @@
 #include "prx/libkernel/File/include/FileFlags.hpp"
+#include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/File/include/NativeStat.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestArena.hpp"
@@ -105,6 +106,10 @@ extern "C" {
 
 int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     APS5_LOG_OUT("path=%s flags=0x%X nativeFlags=0x%X mode=0%o", path, flags, MapFlags(flags), mode);
+    if (File::IsRandomDevicePath(path)) {
+        const int fd = File::OpenRandomDevice();
+        return fd < 0 ? SceErrorFromErrno(errno) : fd;
+    }
     auto native = ResolvePath_nid_no_patch(path);
     int fd = NativeOpen(native, MapFlags(flags), mode);
 #ifdef _WIN32
@@ -122,6 +127,7 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
 }
 
 int APS5_VABI sceKernelClose(int d) {
+    File::ForgetRandomDevice(d);
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);
 #endif
@@ -138,6 +144,10 @@ std::int64_t APS5_VABI sceKernelRead(int d, void* buf, std::size_t nbytes) {
     }
     const GuestArena::HostWrite destination(buf, nbytes);
     if (!destination.Open()) errno = EFAULT;
+    if (destination.Open() && File::IsRandomDevice(d)) {
+        File::ReadRandomDevice(buf, nbytes);
+        return static_cast<std::int64_t>(nbytes);
+    }
     auto n = destination.Open() ? NativeRead(d, buf, nbytes) : -1;
     if (n < 0) {
         throw std::runtime_error(std::string(__func__) + ": read failed, fd=" + std::to_string(d) + ", errno=" + std::to_string(errno));
@@ -173,6 +183,10 @@ int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
     }
     if (sb == nullptr) {
         throw std::invalid_argument(std::string(__func__) + ": sb is null");
+    }
+    if (File::IsRandomDevicePath(path)) {
+        File::FillRandomDeviceStat(sb);
+        return 0;
     }
     const auto native = ResolvePath_nid_no_patch(path);
     std::error_code error;

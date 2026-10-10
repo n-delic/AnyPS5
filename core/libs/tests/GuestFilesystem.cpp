@@ -41,6 +41,8 @@ int APS5_VABI pipe_nid_postfix(int*);
 std::int64_t APS5_VABI read_nid_postfix(int, void*, std::size_t);
 std::int64_t APS5_VABI write_nid_postfix(int, const void*, std::size_t);
 int APS5_VABI sceKernelDebugOutText(int, const char*);
+int APS5_VABI sceKernelFstat(int, FileStat*);
+std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 }
 static void Check(bool value, int line) {
     if (!value) {
@@ -208,4 +210,21 @@ int main() {
     Require(rmdir_nid_postfix(empty.string().c_str()) == 0 && !std::filesystem::exists(empty));
     Require(remove_nid_postfix(root.string().c_str()) == 0);
     Require(!std::filesystem::exists(root));
+    for (const char* device : {"/dev/urandom", "/dev/random"}) {
+        FileStat deviceStatus{};
+        Require(stat_nid_postfix(device, &deviceStatus) == 0 && (deviceStatus.st_mode & 0170000) == 0020000);
+        const int random = open_nid_postfix(device, 0, 0);
+        Require(random >= 0);
+        deviceStatus = FileStat{};
+        Require(sceKernelFstat(random, &deviceStatus) == 0 && (deviceStatus.st_mode & 0170000) == 0020000);
+        unsigned char bytes[64]{};
+        Require(sceKernelRead(random, bytes, sizeof(bytes)) == static_cast<std::int64_t>(sizeof(bytes)));
+        Require(read_nid_postfix(random, bytes, 7) == 7);
+        bool nonzero = false;
+        for (const auto byte : bytes) nonzero = nonzero || byte != 0;
+        Require(nonzero);
+        Require(close_nid_postfix(random) == 0);
+        deviceStatus = FileStat{};
+        Require(sceKernelFstat(random, &deviceStatus) != 0);
+    }
 }

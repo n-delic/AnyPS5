@@ -1,5 +1,6 @@
 #include "prx/libkernel/File/include/NativeStat.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#include "prx/libkernel/File/include/RandomDevice.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -85,6 +86,10 @@ void FillFileStat(const std::filesystem::path& nativePath, FileStat* sb) {
 }
 
 void FillFileStat(int nativeDescriptor, FileStat* sb) {
+    if (IsRandomDevice(nativeDescriptor)) {
+        FillRandomDeviceStat(sb);
+        return;
+    }
     NativeStat st{};
     if (DoFstat(nativeDescriptor, &st) != 0) {
         throw std::runtime_error(std::string("FillFileStat: fstat failed for fd ") + std::to_string(nativeDescriptor));
@@ -93,6 +98,10 @@ void FillFileStat(int nativeDescriptor, FileStat* sb) {
 }
 
 bool FillFileStatFromDescriptor(int fd, FileStat* sb) {
+    if (IsRandomDevice(fd)) {
+        FillRandomDeviceStat(sb);
+        return true;
+    }
     NativeStat st{};
     if (DoFstat(fd, &st) != 0) return false;
     CopyNativeStat(st, sb);
